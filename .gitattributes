@@ -1,0 +1,8 @@
+* text=auto
+*.luau text eol=lf
+*.json text eol=lf
+*.py text eol=lf
+*.blend binary
+*.fbx binary
+*.glb binary
+*.wav binary

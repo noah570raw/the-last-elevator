@@ -1,0 +1,18 @@
+# Local place and build output
+/build/
+*.rbxl
+*.rbxlx
+*.rbxl.lock
+sourcemap.json
+
+# Local machine and credentials
+.env
+.env.*
+!.env.example
+*.log
+.claude/settings.local.json
+CLAUDE.local.md
+*.blend1
+*.blend2
+.DS_Store
+Thumbs.db
