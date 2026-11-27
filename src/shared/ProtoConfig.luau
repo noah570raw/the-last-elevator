@@ -15,6 +15,9 @@ return table.freeze({
 	CONFIRM_HOLD = 1.5,
 	PREVIEW_MAX_DISTANCE = 12,
 	PREVIEW_TIMEOUT = 20,
+	PREVIEW_SERVER_SLACK_DISTANCE = 2, -- server tolerance over the client limits (latency)
+	PREVIEW_SERVER_SLACK_TIME = 1,
+	PENDING_NOTICE_AFTER = 30, -- join keeps actions blocked while an earlier write is unresolved
 	SAVE_ATTEMPTS = 3,
 	SAVE_BACKOFF = table.freeze({ 1, 2 }),
 
@@ -25,6 +28,7 @@ return table.freeze({
 	BACKEND_ATTRIBUTE = "TLE_StoreBackend", -- Workspace attribute: "memory" (default) | "datastore"
 	MSG_PROFILE_UNAVAILABLE = "Профиль недоступен. Попробуй войти снова.",
 	MSG_PROFILE_LOADING = "Профиль загружается…",
+	MSG_SAVE_PENDING = "Предыдущее сохранение ещё выполняется…",
 
 	-- Instance names
 	REMOTES = "TLE_Remotes",

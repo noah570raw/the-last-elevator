@@ -93,16 +93,24 @@ print(string.format("[TLE Proto] capture+attach ready · store=%s", Store.backen
 if RunService:IsStudio() then
 	local debugFn = Instance.new("BindableFunction")
 	debugFn.Name = "TLE_Debug"
+	-- Commands that reset or corrupt profile I/O are allowed on the in-memory test store only.
+	local MEMORY_ONLY = { fault = true, resetProfile = true, agePreview = true }
 	debugFn.OnInvoke = function(cmd: string, a: any, b: any): any
 		local owner = ownerPlayer()
 		if not owner then
 			return { error = "no_owner" }
+		end
+		if MEMORY_ONLY[cmd] and Store.backendName() ~= "memory" then
+			warn(string.format("[TLE Proto] debug '%s' refused: store=%s", cmd, Store.backendName()))
+			return { error = "memory_only" }
 		end
 		if cmd == "state" then
 			return Attach.debugState(owner)
 		elseif cmd == "fault" then
 			(Store.faults :: any)[a] = b
 			return Store.faults
+		elseif cmd == "agePreview" then
+			return Attach.debugAgePreview(owner, a)
 		elseif cmd == "trigger" then
 			return { Capture.start(owner) }
 		elseif cmd == "cancel" then
@@ -118,8 +126,7 @@ if RunService:IsStudio() then
 			Attach.join(owner)
 			return Attach.debugState(owner)
 		elseif cmd == "resetProfile" then
-			Store.remove(Attach.profileKey(owner.UserId))
-			return true
+			return Store.remove(Attach.profileKey(owner.UserId))
 		end
 		return { error = "unknown_cmd" }
 	end

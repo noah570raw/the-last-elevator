@@ -66,9 +66,6 @@ local dataStoreBackend = {
 		options.UseCache = false
 		return (ds():GetAsync(key, options))
 	end,
-	remove = function(key: string)
-		ds():RemoveAsync(key)
-	end,
 }
 
 function Store.backendName(): string
@@ -79,8 +76,15 @@ local function backend()
 	return if Store.backendName() == "datastore" then dataStoreBackend else memoryBackend
 end
 
+local NO_FAULTS = table.freeze({ latency = 0, updateFailBefore = 0, updateFailAfter = 0, getFail = 0 })
+
+-- Fault injection applies only to the in-memory test store, never to DataStore.
+local function activeFaults(): any
+	return if Store.backendName() == "memory" then Store.faults else NO_FAULTS
+end
+
 function Store.update(key: string, transform: Transform): (boolean, any)
-	local f = Store.faults
+	local f = activeFaults()
 	if f.latency > 0 then
 		task.wait(f.latency)
 	end
@@ -101,7 +105,7 @@ end
 
 -- Uncached read (DataStoreGetOptions.UseCache = false on DataStore).
 function Store.get(key: string): (boolean, any)
-	local f = Store.faults
+	local f = activeFaults()
 	if f.latency > 0 then
 		task.wait(f.latency)
 	end
@@ -118,8 +122,13 @@ function Store.peek(key: string): any
 	return if ok then result else nil
 end
 
-function Store.remove(key: string)
-	pcall(backend().remove, key)
+-- Debug reset: in-memory test store only.
+function Store.remove(key: string): boolean
+	if Store.backendName() ~= "memory" then
+		return false
+	end
+	memoryBackend.remove(key)
+	return true
 end
 
 return Store

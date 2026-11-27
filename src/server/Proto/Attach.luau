@@ -12,12 +12,14 @@ local Store = require(script.Parent:WaitForChild("Store") :: ModuleScript)
 local Capture = require(script.Parent:WaitForChild("Capture") :: ModuleScript)
 
 type Op = { opId: string, instanceId: string, socketId: string, userId: number }
+type Preview = { socketId: string, tokenId: string, startedAt: number }
 type Session = {
 	loaded: boolean,
 	readOnly: boolean,
 	locked: boolean,
 	lockReason: string?,
 	inflight: Op?,
+	preview: Preview?, -- server record of the last select; confirm requires it (DEC-02 A4/A5)
 }
 export type Result = { status: string, reason: string?, instanceId: string? }
 
@@ -88,10 +90,21 @@ local function canSelect(player: Player): boolean
 		and not socketOccupied()
 end
 
+local function aliveRoot(player: Player): BasePart?
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local root = char and char:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if hum and root and hum.Health > 0 then
+		return root
+	end
+	return nil
+end
+
 function Attach.refresh()
 	local owner = ownerPlayer()
 	local enabled = owner ~= nil and canSelect(owner)
 	selectPrompt.Enabled = enabled
+	door:SetAttribute("Selectable", enabled) -- clients derive local prompt state from this, never from Enabled
 	for _, f in frames do
 		f.Transparency = if enabled then 0.1 else 0.85
 	end
@@ -191,6 +204,22 @@ function Attach.confirm(player: Player, socketId: any, tokenId: any): Result
 	if not tok or tok.tokenId ~= tokenId then
 		return reject("bad_token")
 	end
+	-- Preview validity is checked on the server, not only on the client.
+	local pv = s.preview
+	if not pv or pv.socketId ~= socketId or pv.tokenId ~= tokenId then
+		return reject("no_preview")
+	end
+	if os.clock() - pv.startedAt > Config.PREVIEW_TIMEOUT + Config.PREVIEW_SERVER_SLACK_TIME then
+		s.preview = nil
+		return reject("preview_expired")
+	end
+	local root = aliveRoot(player)
+	if not root then
+		return reject("no_character")
+	end
+	if (root.Position - socket.Position).Magnitude > Config.PREVIEW_MAX_DISTANCE + Config.PREVIEW_SERVER_SLACK_DISTANCE then
+		return reject("too_far")
+	end
 	if socketOccupied() then
 		return reject("occupied")
 	end
@@ -199,6 +228,7 @@ function Attach.confirm(player: Player, socketId: any, tokenId: any): Result
 	end
 
 	local op: Op = { opId = HttpService:GenerateGUID(false), instanceId = id, socketId = socketId, userId = player.UserId }
+	s.preview = nil -- one confirm per preview; repeats are answered by the inflight/attached checks above
 	s.inflight = op
 	pendingOps[op.userId] = op
 	tok.inUse = true
@@ -246,6 +276,8 @@ function Attach.select(player: Player): Result
 	end
 	local tok = Capture.getToken(player) :: Capture.Token
 	local compatible = SocketMath.isCompatible(socket, template)
+	local s = sessions[player] :: Session
+	s.preview = { socketId = Config.SOCKET_ID, tokenId = tok.tokenId, startedAt = os.clock() }
 	previewRemote:FireClient(player, Config.SOCKET_ID, tok.tokenId, compatible)
 	return { status = if compatible then "preview" else "preview_incompatible" }
 end
@@ -255,10 +287,18 @@ function Attach.join(player: Player)
 	sessions[player] = s
 	Capture.setBlocked(Config.MSG_PROFILE_LOADING)
 
-	-- An attach from a previous session may still be writing: reconcile after it settles.
-	local waited = 0
-	while pendingOps[player.UserId] and waited < 30 do
+	-- An attach from a previous session may still be writing. Its outcome is unknown until it settles:
+	-- keep the session unloaded (capture and attach blocked) for as long as it takes, then reconcile from the profile.
+	local waited, noticed = 0, false
+	while pendingOps[player.UserId] do
 		waited += task.wait(0.25)
+		if sessions[player] ~= s then
+			return
+		end
+		if not noticed and waited >= Config.PENDING_NOTICE_AFTER then
+			noticed = true
+			notify(player, Config.MSG_SAVE_PENDING)
+		end
 	end
 
 	local ok, data = false, nil
@@ -330,7 +370,9 @@ function Attach.debugState(player: Player): { [string]: any }
 			locked = s.locked,
 			lockReason = s.lockReason,
 			inflight = s.inflight and s.inflight.opId,
+			previewAge = s.preview and (os.clock() - s.preview.startedAt),
 		},
+		pendingWrite = pendingOps[player.UserId] ~= nil,
 		modules = modules,
 		doorOpen = not door.CanCollide,
 		selectEnabled = selectPrompt.Enabled,
@@ -340,6 +382,16 @@ end
 
 function Attach.profileKey(userId: number): string
 	return profileKey(userId)
+end
+
+-- Debug (memory store only): age the current preview by `seconds`.
+function Attach.debugAgePreview(player: Player, seconds: number): boolean
+	local s = sessions[player]
+	if not s or not s.preview then
+		return false
+	end
+	s.preview.startedAt -= seconds
+	return true
 end
 
 function Attach.init(opts: {

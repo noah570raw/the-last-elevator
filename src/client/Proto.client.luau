@@ -80,6 +80,32 @@ notifyRemote.OnClientEvent:Connect(showMessage)
 type Preview = { ghost: Model, confirm: ProximityPrompt, cancel: ProximityPrompt, alive: boolean }
 local current: Preview? = nil
 
+-- The server publishes availability in the door attribute "Selectable"; the local prompt is hidden
+-- only while a preview is open and restored from that attribute afterwards.
+local function applySelectPrompt()
+	local select = door:FindFirstChild("SelectSocketPrompt") :: ProximityPrompt?
+	if not select then
+		return
+	end
+	local want = door:GetAttribute("Selectable") == true and current == nil
+	if select.Enabled ~= want then
+		select.Enabled = want
+	end
+end
+door:GetAttributeChangedSignal("Selectable"):Connect(applySelectPrompt)
+door.ChildAdded:Connect(function(child)
+	if child.Name == "SelectSocketPrompt" then
+		(child :: ProximityPrompt):GetPropertyChangedSignal("Enabled"):Connect(applySelectPrompt)
+		applySelectPrompt()
+	end
+end)
+do
+	local select = door:FindFirstChild("SelectSocketPrompt") :: ProximityPrompt?
+	if select then
+		select:GetPropertyChangedSignal("Enabled"):Connect(applySelectPrompt)
+	end
+end
+
 local function endPreview(reason: string?)
 	local pv = current
 	if not pv then
@@ -90,6 +116,7 @@ local function endPreview(reason: string?)
 	pv.ghost:Destroy()
 	pv.confirm:Destroy()
 	pv.cancel:Destroy()
+	applySelectPrompt()
 	if reason then
 		showMessage(reason)
 	end
@@ -121,10 +148,6 @@ end
 
 local function startPreview(socketId: string, tokenId: string, compatible: boolean)
 	endPreview(nil)
-	local select = door:FindFirstChild("SelectSocketPrompt") :: ProximityPrompt?
-	if select then
-		select.Enabled = false -- local only; the server value replicates back on its next change
-	end
 
 	local confirm = Instance.new("ProximityPrompt")
 	confirm.Name = "TLE_ConfirmAttach"
@@ -149,6 +172,7 @@ local function startPreview(socketId: string, tokenId: string, compatible: boole
 
 	local pv: Preview = { ghost = makeGhost(compatible), confirm = confirm, cancel = cancel, alive = true }
 	current = pv
+	applySelectPrompt()
 
 	cancel.Triggered:Connect(function()
 		endPreview("Предпросмотр отменён.")
